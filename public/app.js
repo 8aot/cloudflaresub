@@ -34,13 +34,28 @@ fillDemoBtn.addEventListener('click', () => {
   document.getElementById('keepOriginalHost').checked = true;
 });
 
+async function parseApiResponse(response, fallbackMessage) {
+  const contentType = response.headers.get('content-type') || '';
+  const raw = await response.text();
+  let data = null;
+  try { data = raw ? JSON.parse(raw) : null; } catch {}
+
+  if (!data) {
+    if (contentType.includes('text/html') || /^\s*<!doctype\s+html/i.test(raw) || /^\s*<html[\s>]/i.test(raw)) {
+      throw new Error('当前页面是 Cloudflare Pages，/api 接口没有运行 Worker。请将项目部署为 Cloudflare Worker 后再试。');
+    }
+    throw new Error(`${fallbackMessage}：服务器返回的不是合法 JSON（HTTP ${response.status}）。`);
+  }
+  return data;
+}
+
 async function fetchPreferredApiItems(apiUrl) {
   const response = await fetch('/api/fetch-preferred', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ url: apiUrl }),
   });
-  const data = await response.json().catch(() => ({}));
+  const data = await parseApiResponse(response, '获取优选 IP 失败');
   if (!response.ok || !data.ok) throw new Error(data.error || '获取优选 IP 失败');
   return Array.isArray(data.items) ? data.items : [];
 }
@@ -84,8 +99,6 @@ form.addEventListener('submit', async (event) => {
   let preferredIps = document.getElementById('preferredIps').value;
   const apiUrl = preferredApiUrl.value.trim();
 
-  // 填了 API 就在“生成订阅”时自动请求，并把返回地址直接写入本次订阅。
-  // 用户不需要再先点击“获取优选 IP”。
   if (apiUrl) {
     if (!/^https?:\/\//i.test(apiUrl)) {
       warningBox.textContent = '优选 API 地址必须以 http:// 或 https:// 开头。';
@@ -129,7 +142,7 @@ form.addEventListener('submit', async (event) => {
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    const data = await parseApiResponse(response, '生成订阅失败');
     if (!response.ok || !data.ok) throw new Error(data.error || '生成失败');
 
     autoUrl.value = data.urls.auto;
